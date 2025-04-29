@@ -345,6 +345,7 @@ class LeRobotAirbotDataConfig(DataConfigFactory):
                     {
                         "observation/image": "image",
                         "observation/wrist_image": "wrist_image",
+                        "observation/pure_drawn_image": "pure_drawn_image",
                         "observation/state": "state",
                         "actions": "actions",
                         "prompt": "prompt",
@@ -587,7 +588,7 @@ _CONFIGS = [
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotAirbotDataConfig(
-            repo_id="airbot_pickcub",
+            repo_id="airbot_tranfer_3x3",
             base_config=DataConfig(
                 local_files_only=True,  # Set to True for local-only datasets.
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the

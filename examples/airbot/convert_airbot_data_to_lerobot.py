@@ -39,7 +39,7 @@ def main():
     # OpenPi assumes that proprio is stored in `state` and actions in `action`
     # LeRobot assumes that dtype of image data is `image`
     dataset = LeRobotDataset.create(
-        repo_id="airbot_pickcub",
+        repo_id="airbot_tranfer_3x3",
         robot_type="airbot",
         fps=20,
         features={
@@ -49,6 +49,16 @@ def main():
                 "names": ["height", "width", "channel"],
             },
             "wrist_image": {
+                "dtype": "image",
+                "shape": (640, 480, 3),
+                "names": ["height", "width", "channel"],
+            },
+            "pure_drawn_image": {
+                "dtype": "image",
+                "shape": (640, 480, 3),
+                "names": ["height", "width", "channel"],
+            },
+            "ref_trajectory_image": {
                 "dtype": "image",
                 "shape": (640, 480, 3),
                 "names": ["height", "width", "channel"],
@@ -69,7 +79,7 @@ def main():
     )
 
     # 定义原始数据路径
-    raw_data_dir = Path("data/airbot_0326/transfer_block")
+    raw_data_dir = Path("data/3x3_transfer_1")
     
     # 遍历所有子目录
     for sub_dir in raw_data_dir.glob("*/"):
@@ -78,7 +88,16 @@ def main():
         cam2_path = sub_dir / "observation.images.cam2.mp4"
         lowdim_path = sub_dir / "low_dim.json"
         meta_path = sub_dir / "meta.json"
-        
+        pure_drawn_path = sub_dir / "pure_drawn.png"
+        ref_trajectory_path = sub_dir / "ref_with_trajectory.jpg"
+
+        if not pure_drawn_path.exists():
+            raise FileNotFoundError(f"纯绘图图像文件不存在: {pure_drawn_path}")
+        if not ref_trajectory_path.exists():
+            raise FileNotFoundError(f"参考轨迹图像文件不存在: {ref_trajectory_path}")
+        pure_drawn_img = cv2.imread(str(pure_drawn_path))
+        ref_trajectory_img = cv2.imread(str(ref_trajectory_path))
+
         if not (cam1_path.exists() and cam2_path.exists() and lowdim_path.exists()):
             print(f"警告: 在目录 {sub_dir} 中缺少必要的视频文件或元数据文件")
             continue
@@ -161,7 +180,6 @@ def main():
         for i in range(100, length):
             # 检查从当前帧到最后一帧的关节位置和末端执行器位置变化是否都小于阈值
             all_small = True
-            # 如果剩余帧数不足10帧，则检查剩余所有帧
             check_length = length-i
             for j in range(check_length):
                 joint_diff = np.abs(np.array(act_joint_positions[i+j]) - np.array(act_joint_positions[i+j-1]))
@@ -188,13 +206,15 @@ def main():
         for step in range(truncate_idx):
             dataset.add_frame(
                 {
-                    "image": cam2_frames_list[step],
-                    "wrist_image": cam1_frames_list[step],
+                    "image": cam1_frames_list[step],
+                    "wrist_image": cam2_frames_list[step],
+                    "ref_trajectory_image": ref_trajectory_img,
+                    "pure_drawn_image": pure_drawn_img,
                     "state": np.concatenate([obs_joint_positions[step],obs_eef_positions[step]]),
                     "actions": np.concatenate([act_joint_positions[step],act_eef_positions[step]]),
                 }
             )
-        dataset.save_episode(task="put the cuboid into the bowl")
+        dataset.save_episode(task="put the block into the cup according to refence image.")
 
     # Consolidate the dataset, skip computing stats since we will do that later
     dataset.consolidate(run_compute_stats=False)
