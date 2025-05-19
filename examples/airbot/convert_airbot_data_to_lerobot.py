@@ -39,7 +39,7 @@ def main():
     # OpenPi assumes that proprio is stored in `state` and actions in `action`
     # LeRobot assumes that dtype of image data is `image`
     dataset = LeRobotDataset.create(
-        repo_id="airbot_tranfer_3x3",
+        repo_id="airbot_tranfer_lowrandom",
         robot_type="airbot",
         fps=20,
         features={
@@ -79,7 +79,7 @@ def main():
     )
 
     # 定义原始数据路径
-    raw_data_dir = Path("data/3x3_transfer_1")
+    raw_data_dir = Path("data/3x3_low_random")
     
     # 遍历所有子目录
     for sub_dir in raw_data_dir.glob("*/"):
@@ -206,15 +206,15 @@ def main():
         for step in range(truncate_idx):
             dataset.add_frame(
                 {
-                    "image": cam1_frames_list[step],
-                    "wrist_image": cam2_frames_list[step],
+                    "image": cam2_frames_list[step],
+                    "wrist_image": cam1_frames_list[step],
                     "ref_trajectory_image": ref_trajectory_img,
                     "pure_drawn_image": pure_drawn_img,
                     "state": np.concatenate([obs_joint_positions[step],obs_eef_positions[step]]),
                     "actions": np.concatenate([act_joint_positions[step],act_eef_positions[step]]),
                 }
             )
-        dataset.save_episode(task="put the block into the cup according to refence image.")
+        dataset.save_episode(task="Put the block into the cup according to refence image.")
 
     # Consolidate the dataset, skip computing stats since we will do that later
     dataset.consolidate(run_compute_stats=False)

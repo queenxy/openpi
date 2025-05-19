@@ -63,6 +63,7 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    val_repo_id: str | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -139,6 +140,7 @@ class ModelTransformFactory(GroupFactory):
 class DataConfigFactory(abc.ABC):
     # The LeRobot repo id.
     repo_id: str = tyro.MISSING
+    val_repo_id: str = tyro.MISSING
     # Determines how the assets will be loaded.
     assets: AssetsConfig = dataclasses.field(default_factory=AssetsConfig)
     # Base config that will be updated by the factory.
@@ -150,10 +152,12 @@ class DataConfigFactory(abc.ABC):
 
     def create_base_config(self, assets_dirs: pathlib.Path) -> DataConfig:
         repo_id = self.repo_id if self.repo_id is not tyro.MISSING else None
+        val_repo_id = self.val_repo_id if self.val_repo_id is not tyro.MISSING else None
         asset_id = self.assets.asset_id or repo_id
         return dataclasses.replace(
             self.base_config or DataConfig(),
             repo_id=repo_id,
+            val_repo_id=val_repo_id,
             asset_id=asset_id,
             norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
         )
@@ -345,7 +349,7 @@ class LeRobotAirbotDataConfig(DataConfigFactory):
                     {
                         "observation/image": "image",
                         "observation/wrist_image": "wrist_image",
-                        "observation/pure_drawn_image": "pure_drawn_image",
+                        "observation/ref_trajectory_image": "ref_trajectory_image",
                         "observation/state": "state",
                         "actions": "actions",
                         "prompt": "prompt",
@@ -439,10 +443,11 @@ class TrainConfig:
 
     # How often (in steps) to log training metrics.
     log_interval: int = 100
+    eval_interval: int = 10
     # How often (in steps) to save checkpoints.
     save_interval: int = 1000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
-    keep_period: int | None = 5000
+    keep_period: int | None = 2000
 
     # If true, will overwrite the checkpoint directory if it already exists.
     overwrite: bool = False
@@ -588,7 +593,8 @@ _CONFIGS = [
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotAirbotDataConfig(
-            repo_id="airbot_tranfer_3x3",
+            repo_id="airbot_tranfer_lowrandom",
+            val_repo_id="airbot_tranfer_3x3",
             base_config=DataConfig(
                 local_files_only=True,  # Set to True for local-only datasets.
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the

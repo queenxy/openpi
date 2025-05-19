@@ -189,6 +189,31 @@ def train_step(
     }
     return new_state, info
 
+@at.typecheck
+def eval_step(
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> tuple[dict[str, at.Array]]:
+    model = nnx.merge(state.model_def, state.params)
+    model.eval()  # 改为eval模式
+
+    @at.typecheck
+    def loss_fn(
+        model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
+    ):
+        chunked_loss = model.compute_loss(rng, observation, actions, train=False)  # train=False
+        return jnp.mean(chunked_loss)
+
+    eval_rng = jax.random.fold_in(rng, state.step)
+    observation, actions = batch
+
+    # 评估时不计算梯度
+    loss = loss_fn(model, eval_rng, observation, actions)
+    info = {
+        "val_loss": loss,
+    }
+    return (info,) 
 
 def main(config: _config.TrainConfig):
     init_logging()
@@ -216,7 +241,7 @@ def main(config: _config.TrainConfig):
     )
     init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
 
-    data_loader = _data_loader.create_data_loader(
+    data_loader, val_data_loader = _data_loader.create_data_loader(
         config,
         sharding=data_sharding,
         num_workers=config.num_workers,
@@ -224,7 +249,12 @@ def main(config: _config.TrainConfig):
     )
     data_iter = iter(data_loader)
     batch = next(data_iter)
+
+    val_data_iter = iter(val_data_loader)
+    val_batch = next(val_data_iter)
+    
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
+    logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(val_batch)}")
 
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
     jax.block_until_ready(train_state)
@@ -238,6 +268,12 @@ def main(config: _config.TrainConfig):
         in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
         out_shardings=(train_state_sharding, replicated_sharding),
         donate_argnums=(1,),
+    )
+
+    peval_step = jax.jit(
+        functools.partial(eval_step),
+        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+        out_shardings=(replicated_sharding,),
     )
 
     start_step = int(train_state.step)
@@ -260,7 +296,12 @@ def main(config: _config.TrainConfig):
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
+        if step % config.eval_interval == 0:
+            eval_infos = peval_step(train_rng, train_state, val_batch)
+            wandb.log({"val_loss": eval_infos[0]["val_loss"]}, step=step)
+
         batch = next(data_iter)
+        val_batch = next(val_data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)

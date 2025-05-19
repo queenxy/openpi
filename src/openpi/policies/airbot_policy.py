@@ -13,7 +13,6 @@ def make_airbot_example() -> dict:
         "observation/state": np.random.rand(7),
         "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
-        "observation/pure_drawn_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "prompt": "do something",
     }
 
@@ -66,7 +65,7 @@ class AirbotInputs(transforms.DataTransformFn):
         # right wrist image below.
         base_image = _parse_image(data["observation/image"])
         wrist_image = _parse_image(data["observation/wrist_image"])
-        ref_image = _parse_image(data["observation/pure_drawn_image"])
+        ref_image =  _parse_image(data["observation/ref_trajectory_image"])
 
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
@@ -81,7 +80,7 @@ class AirbotInputs(transforms.DataTransformFn):
                 "base_0_rgb": np.True_,
                 "left_wrist_0_rgb": np.True_,
                 # Mask any non-existent images with False (if ``mask_padding`` is True).
-                "right_wrist_0_rgb": np.True_,
+                "right_wrist_0_rgb":  np.True_,
             },
         }
 

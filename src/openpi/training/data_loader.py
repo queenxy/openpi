@@ -81,9 +81,10 @@ class FakeDataset(Dataset):
         return self._num_samples
 
 
-def create_dataset(data_config: _config.DataConfig, model_config: _model.BaseModelConfig) -> Dataset:
+def create_dataset(data_config: _config.DataConfig, model_config: _model.BaseModelConfig) -> tuple[Dataset, Dataset]:
     """Create a dataset for training."""
     repo_id = data_config.repo_id
+    val_repo_id = data_config.val_repo_id
     if repo_id is None:
         raise ValueError("Repo ID is not set. Cannot create dataset.")
     if repo_id == "fake":
@@ -98,14 +99,29 @@ def create_dataset(data_config: _config.DataConfig, model_config: _model.BaseMod
         },
         local_files_only=data_config.local_files_only,
     )
-
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
+    
+    if val_repo_id is None:
+        raise ValueError("Val Repo ID is not set. Cannot create dataset.")
+        val_dataset = FakeDataset(model_config, num_samples=1024)
+    else:
+        val_dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(val_repo_id, local_files_only=data_config.local_files_only)
+        val_dataset = lerobot_dataset.LeRobotDataset(
+            val_repo_id,
+            delta_timestamps={
+                key: [t / val_dataset_meta.fps for t in range(model_config.action_horizon)]
+                for key in data_config.action_sequence_keys
+            },
+            local_files_only=data_config.local_files_only,
+        )
+        if data_config.prompt_from_task:
+            val_dataset = TransformedDataset(val_dataset, [_transforms.PromptFromLeRobotTask(val_dataset_meta.tasks)])
 
-    return dataset
+    return dataset, val_dataset
 
 
-def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip_norm_stats: bool = False) -> Dataset:
+def transform_dataset(dataset: Dataset, val_dataset: Dataset, data_config: _config.DataConfig, *, skip_norm_stats: bool = False) -> Dataset:
     """Transform the dataset by applying the data transforms."""
     norm_stats = {}
     if data_config.repo_id != "fake" and not skip_norm_stats:
@@ -124,6 +140,14 @@ def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip
             _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
             *data_config.model_transforms.inputs,
         ],
+    ), TransformedDataset(
+        val_dataset,
+        [
+            *data_config.repack_transforms.inputs,
+            *data_config.data_transforms.inputs,
+            _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+            *data_config.model_transforms.inputs,
+        ],
     )
 
 
@@ -135,7 +159,7 @@ def create_data_loader(
     shuffle: bool = False,
     num_batches: int | None = None,
     num_workers: int = 0,
-) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
+) -> tuple[DataLoader[tuple[_model.Observation, _model.Actions]],DataLoader[tuple[_model.Observation, _model.Actions]]]:
     """Create a data loader for training.
 
     Args:
@@ -152,11 +176,21 @@ def create_data_loader(
     """
     data_config = config.data.create(config.assets_dirs, config.model)
 
-    dataset = create_dataset(data_config, config.model)
-    dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
+    dataset, val_dataset = create_dataset(data_config, config.model)
+    dataset, val_dataset = transform_dataset(dataset, val_dataset, data_config, skip_norm_stats=skip_norm_stats)
 
     data_loader = TorchDataLoader(
         dataset,
+        local_batch_size=config.batch_size // jax.process_count(),
+        sharding=sharding,
+        shuffle=shuffle,
+        num_batches=num_batches,
+        num_workers=num_workers,
+        seed=config.seed,
+    )
+
+    val_data_loader = TorchDataLoader(
+        val_dataset,
         local_batch_size=config.batch_size // jax.process_count(),
         sharding=sharding,
         shuffle=shuffle,
@@ -177,7 +211,7 @@ def create_data_loader(
             for batch in self._data_loader:
                 yield _model.Observation.from_dict(batch), batch["actions"]
 
-    return DataLoaderImpl(data_config, data_loader)
+    return DataLoaderImpl(data_config, data_loader), DataLoaderImpl(data_config, val_data_loader)
 
 
 class TorchDataLoader:
